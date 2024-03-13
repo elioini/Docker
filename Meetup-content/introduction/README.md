@@ -366,7 +366,7 @@ CMD ["development"]
 
 In the case above, if you run `docker run {image-name} production`, the argument that you passed in ("production") will override "development" as specified in CMD. 
 
-The main difference between them is that `ENTRYPOINT` will always be run unless `--entrypoint` option is provided to `docker run`. `CMD` on the other hand, can be overridden by providing arguments to the `docker run` command.
+The main difference between them is that `ENTRYPOINT` will always  run unless `--entrypoint` option is provided to `docker run`. `CMD` on the other hand, can be overridden by providing arguments to the `docker run` command.
 
 
 In this case, you could provide anything to the `docker run` command... whether it is `/bin/bash` to `ls /etc`.
@@ -661,6 +661,12 @@ networks:
   app-network:
     driver: bridge
 
+```
+
+Then we can start it using
+
+```shell
+$ docker-compose up --build
 ```
 
   </p>
