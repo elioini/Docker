@@ -451,3 +451,218 @@ Then if anyone wants to use it
 ```
 $ docker pull username/myimage:v1.0
 ```
+
+### Challenge
+
+Given the following node.js app, create a Dockerfile for the application. The application need to interact with MySQL database. Before starting the application, make sure to start a MySQL container as well. (The code can be found in the webapp_db folder)
+
+app.js
+```js
+const express = require('express');
+const mysql = require('mysql');
+const app = express();
+const port = 3000;
+
+// Create a connection pool
+const pool = mysql.createPool({
+    connectionLimit: 10, // Adjust according to your application's needs
+    host: 'mysql-container', // Use the service name from docker-compose.yml as the host
+    user: 'user',
+    password: 'password',
+    database: 'mydatabase'
+});
+
+// Utility function to attempt a database query with a retry mechanism
+function queryWithRetry(sql, retries = 5) {
+    return new Promise((resolve, reject) => {
+        const attemptQuery = (attemptsLeft) => {
+            pool.query(sql, (error, results) => {
+                if (error) {
+                    console.error(`Query error: ${error.message}. Retrying... Attempts left: ${attemptsLeft - 1}`);
+                    if (attemptsLeft - 1 > 0) {
+                        setTimeout(() => attemptQuery(attemptsLeft - 1), 2000); // Wait 2 seconds before retrying
+                    } else {
+                        reject(error);
+                    }
+                } else {
+                    resolve(results);
+                }
+            });
+        };
+        attemptQuery(retries);
+    });
+}
+
+app.get('/', async (req, res) => {
+    try {
+        const results = await queryWithRetry('SELECT * FROM test_table', 5);
+        res.json(results);
+    } catch (error) {
+        console.error('Failed to query the database:', error);
+        res.status(500).send('Failed to access the database.');
+    }
+});
+
+app.listen(port, () => {
+    console.log(`App listening at http://localhost:${port}`);
+});
+```
+
+We are also using an sql file to initialise the database:
+
+mysql-init.sql
+```sql
+CREATE DATABASE IF NOT EXISTS mydatabase;
+USE mydatabase;
+
+CREATE TABLE IF NOT EXISTS test_table (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    message VARCHAR(255) NOT NULL
+);
+
+-- Insert initial data
+INSERT INTO test_table (message) VALUES ('Hello, world!');
+
+CREATE DATABASE IF NOT EXISTS mydatabase;
+CREATE USER IF NOT EXISTS 'user'@'%' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON mydatabase.* TO 'user'@'%';
+FLUSH PRIVILEGES;
+```
+To simplify the task, here are the commands to run both containers
+
+Start MySQL
+```shell
+$ docker run --name mysql-container --network test-network -e MYSQL_ROOT_PASSWORD=root_password -v ./mysql-init.sql:/docker-entrypoint-initdb.d/mysql-init.sql -d mysql:5.7
+```
+
+Start the node app
+```shell
+docker run --name node-app --network test-network -p 3000:3000 -d node-app
+```
+
+<details>
+  <summary>Possible solution:</summary>
+
+Dockerfile
+```docker
+
+FROM node:14
+
+WORKDIR /usr/src/app
+COPY package*.json ./
+
+# Install app dependencies
+RUN npm install
+
+# Bundle app source
+COPY . .
+
+EXPOSE 3000
+
+CMD [ "node", "app.js" ]
+```
+
+To build the image use
+```shell
+$ docker build -t node-app . 
+```
+
+</details>
+
+
+- - - -
+
+## Part 4: Docker Compose
+GOALS:
+- Basic understanding of docker-compose
+- Being able to run multiple containers without running separate `docker run` commands
+
+By the time you have a platform containing multiple services (containers), it no longer makes sense to run `docker run` for each container. Imagine having to provide all these options with every `docker run` for all your containers!
+
+Instead, you can configure multiple containers in such a way, that you can run the whole stack using one command: `docker-compose up`
+
+### docker-compose.yml
+A basic structure can be found here => https://docs.docker.com/compose/overview/
+
+`services` 
+
+It contains a list of containers that you want to run. The first level below `services` are names that you want to give to your containers. These names will also be used for lookup within your network
+
+`build` and `image`
+
+`build` indicates the location of your Dockerfile. 
+Only needed if you need docker-compose to build your image. 
+Otherwise, just spefified `image` with necessary tags is enough
+
+`ports` 
+
+Takes care of port forwarding
+
+`networks`
+
+They can appear at top-level and within your service.
+
+At top level, it allows you to create a network from scratch. 
+Once created, you can let your containers (services) attach to it by again defining `networks` under the name of your `service`, along with `ports`, `volumes` etc.
+
+`volumes`
+
+At top level, it allows you to define a persistent named-volume, which you can share volume between containers.
+For example, you might want to apply such named-volume to a database container.
+
+Within a `service`, it allows you to mount a path from host into your image. 
+
+`command`
+
+Whether `CMD` was defined or not in your Dockerfile, `command` will always take precedence.
+
+### Challenge
+By now, you should know enough to write your own `docker-compose.yml`.
+
+Your challenge now is to write your `docker-compose.yml`, which includes the webapp and MySQL.
+Ensure that when you run `docker-compose up`, it will start your node app.
+Then verify that the pages it serves at http://localhost:3000/.
+
+Tear down your whole setup with `docker-compose down`. Check the status of your containers and networks. 
+
+<details>
+  <summary>Possible solution:</summary>
+  <p>
+  
+  
+```docker
+version: '3.8'
+
+services:
+  app:
+    build: ./app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - mysql-container
+    networks:
+      - app-network
+
+  mysql-container:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: mydatabase
+    volumes:
+      - ./mysql-init.sql:/docker-entrypoint-initdb.d/mysql-init.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+```
+
+  </p>
+</details>
+
